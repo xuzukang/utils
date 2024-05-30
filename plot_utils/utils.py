@@ -6,11 +6,17 @@ from math import ceil
 from mpl_toolkits.mplot3d import Axes3D
 
 # fig, ax = plt.subplots(figsize=(48, 6))  #创建图像并设置画布大小 plt.figure(figsize=figsize)
+# plt.tick_params(axis='both', which='major', labelsize=14)  # 设置主刻度标签的大小
+# plt.tick_params(axis='both', which='minor', labelsize=10)  # 设置次刻度标签的大小
 # ax.set_xticks(index)  # 设置刻度位置
 # ax.set_xticklabels(index, rotation=45) #刻度旋转
 # plt.tight_layout() #用于自动调整子图参数，使图形中的子图、标签、标题等不重叠，并且整体布局更加紧凑美观
 # ax.tick_params(axis='x', labelsize=7)
 # ax.vlines(index, ymin=0, ymax=data, colors='gray', linestyles='--')
+# plt.title('Box Plot per Channel') #设置标题
+# plt.xlabel('Channel') #设置x轴标签
+# plt.ylabel('Value') #设置y轴标签
+
 
 def plot_box_data_perchannel_fig(data_,path,axis=0):
     if isinstance(data_,torch.Tensor):
@@ -20,9 +26,13 @@ def plot_box_data_perchannel_fig(data_,path,axis=0):
         raise ValueError("Axis should be less than data.shape")
     permuted_data = np.moveaxis(data, axis, 0)
     reshaped_data = permuted_data.reshape(shape[axis], -1)
-    plt.figure(figsize=(shape[axis]//10,6))
+    plt.figure(figsize=(max(shape[axis] // 10, 6),6))
     plt.boxplot(reshaped_data.T)
-    plt.tight_layout()
+    plt.xticks(range(0,shape[axis]+1,10))
+    try:
+        plt.tight_layout()
+    except Exception as e:
+        print(f"Warning: tight_layout failed with error: {e}")
     plt.savefig(path)
     plt.close()
     print('saveing:  ', path)
@@ -34,11 +44,14 @@ def plot_bar_fig(data_,path):
     data_range = np.max(data) - np.min(data)
     bin_width = data_range / 30  # 设定每个区间的宽度
     bins = np.arange(np.min(data), np.max(data) + bin_width, bin_width)
-    plt.hist(data, bins=bins, edgecolor='black')
+    plt.hist(data.reshape(-1), bins=bins, edgecolor='black')
     plt.title('hist plot')
     plt.xlabel("x_val")
     plt.ylabel("num")
-    plt.tight_layout() #用于自动调整子图参数，使图形中的子图、标签、标题等不重叠，并且整体布局更加紧凑美观
+    try:
+        plt.tight_layout()
+    except Exception as e:
+        print(f"Warning: tight_layout failed with error: {e}") #用于自动调整子图参数，使图形中的子图、标签、标题等不重叠，并且整体布局更加紧凑美观
     plt.savefig(path)
     plt.close()
     print('saveing:  ', path)
@@ -72,8 +85,11 @@ def plot_bar3d_fig(data_,path):
     ax.set_xlabel("dim0")
     ax.set_ylabel("dim1")
     ax.set_zlabel("value")
-    
-    plt.tight_layout()
+
+    try:
+        plt.tight_layout()
+    except Exception as e:
+        print(f"Warning: tight_layout failed with error: {e}")
     plt.savefig(path)
     plt.close()
     print('saveing:  ', path)

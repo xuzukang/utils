@@ -85,6 +85,9 @@ class QLinear(nn.Module):
         elif act_quant == "per_tensor":
             self.act_quant_name = "per_tensor"
             self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits)
+        elif act_quant == "per_channel":
+            self.act_quant_name = "per_channel"
+            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits)
         else:
             raise ValueError(f"Invalid act_quant: {act_quant}")
 
@@ -125,12 +128,10 @@ class QLinear(nn.Module):
         )
         if weight_quant == "per_channel":
             new_module.weight = quantize_weight_per_channel_absmax(
-                module.weight, n_bits=w_bits
-            )  # use 8-bit integer for weight
+                module.weight, n_bits=w_bits)  # use 8-bit integer for weight
         elif weight_quant == "per_tensor":
             new_module.weight = quantize_weight_per_tensor_absmax(
-                module.weight, n_bits=w_bits
-            )
+                module.weight, n_bits=w_bits)
         else:
             raise ValueError(f"Invalid weight_quant: {weight_quant}")
         new_module.weight_quant_name = weight_quant
@@ -188,6 +189,9 @@ class QConv1d(nn.Conv1d):
         elif act_quant == "per_tensor":
             self.act_quant_name = "per_tensor"
             self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits)
+        elif act_quant == "per_channel":
+            self.act_quant_name = "per_channel"
+            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits)
         else:
             raise ValueError(f"Invalid act_quant: {act_quant}")
 
@@ -253,7 +257,7 @@ class QConv1d(nn.Conv1d):
 
 
 def quantize_mamba(
-    model, weight_quant="per_tensor", act_quant="per_tensor", quantize_bmm_input=True,
+    model, weight_quant="per_tensor", act_quant="per_token", quantize_bmm_input=True,
     a_bits=8,w_bits=8,
 ):
     # from model.mamba import MambaBlock
