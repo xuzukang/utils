@@ -269,18 +269,18 @@ def quantize_mamba(
                 m.conv1d, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
             )
-            # m.x_proj = QLinear.from_float( #影响大
-            #     m.x_proj, weight_quant=weight_quant, 
-            #     act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
-            # )
+            m.x_proj = QLinear.from_float( #影响大
+                m.x_proj, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+            )
             m.dt_proj = QLinear.from_float(
                 m.dt_proj, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
             )
-            # m.out_proj = QLinear.from_float(  #影响大
-            #     m.out_proj, weight_quant=weight_quant, 
-            #     act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
-            # )
+            m.out_proj = QLinear.from_float(  #影响大
+                m.out_proj, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+            )
     return model
 
 
