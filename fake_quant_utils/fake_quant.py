@@ -4,9 +4,12 @@ from functools import partial
 
 
 @torch.no_grad()
-def quantize_weight_per_channel_absmax(w, n_bits=8):
+def quantize_weight_per_channel_absmax(w, method="minmax",percentile=0.99999,n_bits=8):
     # w: (out_features, in_features)
-    scales = w.abs().max(dim=-1, keepdim=True)[0]
+    if method == 'minmax':
+        scales = w.abs().max(dim=-1, keepdim=True)[0]
+    elif method == 'percentile':
+        scales = torch.quantile(w.float().abs(), percentile, dim=-1, keepdim=True)
     q_max = 2 ** (n_bits - 1) - 1
     scales.clamp_(min=1e-5).div_(q_max)
     w.div_(scales).round_().mul_(scales)
@@ -14,9 +17,12 @@ def quantize_weight_per_channel_absmax(w, n_bits=8):
 
 
 @torch.no_grad()
-def quantize_weight_per_tensor_absmax(w, n_bits=8):
+def quantize_weight_per_tensor_absmax(w, method="minmax",percentile=0.99999, n_bits=8):
     # w: (out_features, in_features)
-    scales = w.abs().max()
+    if method == 'minmax':
+        scales = w.abs().max()
+    elif method == 'percentile':
+        scales = torch.quantile(w.float().abs(), percentile)
     q_max = 2 ** (n_bits - 1) - 1
     scales.clamp_(min=1e-5).div_(q_max)
     w.div_(scales).round_().mul_(scales)
@@ -24,10 +30,13 @@ def quantize_weight_per_tensor_absmax(w, n_bits=8):
 
 
 @torch.no_grad()
-def quantize_activation_per_token_absmax(t, n_bits=8):
+def quantize_activation_per_token_absmax(t, method="minmax",percentile=0.99999, n_bits=8):
     t_shape = t.shape
     t.reshape(-1, t_shape[-1])
-    scales = t.abs().max(dim=-1, keepdim=True)[0]
+    if method == 'minmax':
+        scales = t.abs().max(dim=-1, keepdim=True)[0]
+    elif method == 'percentile':
+        scales = torch.quantile(t.float().abs(), percentile, dim=-1, keepdim=True)
     q_max = 2 ** (n_bits - 1) - 1
     scales.clamp_(min=1e-5).div_(q_max)
     t.div_(scales).round_().mul_(scales)
@@ -35,9 +44,13 @@ def quantize_activation_per_token_absmax(t, n_bits=8):
 
 
 @torch.no_grad()
-def quantize_activation_per_tensor_absmax(t, n_bits=8):
+def quantize_activation_per_tensor_absmax(t, method="minmax",percentile=0.99999, n_bits=8):
     t_shape = t.shape
     t.reshape(-1, t_shape[-1])
+    if method == 'minmax':
+        scales = t.abs().max()
+    elif method == 'percentile':
+        scales = torch.quantile(t.float().abs(), percentile)
     scales = t.abs().max()
     q_max = 2 ** (n_bits - 1) - 1
     scales.clamp_(min=1e-5).div_(q_max)
@@ -53,6 +66,8 @@ class QLinear(nn.Module):
         bias=True,
         act_quant="per_token",
         quantize_output=False,
+        a_method="minmax",
+        w_method="minmax",
         w_bits=8,
         a_bits=8,
     ):
@@ -81,13 +96,13 @@ class QLinear(nn.Module):
 
         if act_quant == "per_token":
             self.act_quant_name = "per_token"
-            self.act_quant = partial(quantize_activation_per_token_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_activation_per_token_absmax, n_bits=a_bits,method=a_method)
         elif act_quant == "per_tensor":
             self.act_quant_name = "per_tensor"
-            self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits,method=a_method)
         elif act_quant == "per_channel":
             self.act_quant_name = "per_channel"
-            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits,method=a_method)
         else:
             raise ValueError(f"Invalid act_quant: {act_quant}")
 
@@ -115,7 +130,7 @@ class QLinear(nn.Module):
     @staticmethod
     def from_float(
         module, weight_quant="per_channel", act_quant="per_token", quantize_output=False,
-        a_bits=8,w_bits=8,
+        a_bits=8,w_bits=8,a_method="minmax",w_method="minmax",
     ):
         assert isinstance(module, torch.nn.Linear)
         new_module = QLinear(
@@ -124,14 +139,16 @@ class QLinear(nn.Module):
             module.bias is not None,
             act_quant=act_quant,
             quantize_output=quantize_output,
-            a_bits=8,w_bits=8,
+            a_method=a_method,
+            w_method=w_method,
+            a_bits=a_bits,w_bits=w_bits,
         )
         if weight_quant == "per_channel":
             new_module.weight = quantize_weight_per_channel_absmax(
-                module.weight, n_bits=w_bits)  # use 8-bit integer for weight
+                module.weight, n_bits=w_bits,method=w_method)  # use 8-bit integer for weight
         elif weight_quant == "per_tensor":
             new_module.weight = quantize_weight_per_tensor_absmax(
-                module.weight, n_bits=w_bits)
+                module.weight, n_bits=w_bits,method=w_method)
         else:
             raise ValueError(f"Invalid weight_quant: {weight_quant}")
         new_module.weight_quant_name = weight_quant
@@ -155,6 +172,8 @@ class QConv1d(nn.Conv1d):
         bias: bool = True,
         act_quant: str = "per_token",
         quantize_output: bool = False,
+        a_method="minmax",
+        w_method="minmax",
         a_bits: int = 8,
         w_bits: int = 8
     ):
@@ -185,13 +204,13 @@ class QConv1d(nn.Conv1d):
 
         if act_quant == "per_token":
             self.act_quant_name = "per_token"
-            self.act_quant = partial(quantize_activation_per_token_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_activation_per_token_absmax, n_bits=a_bits,method=a_method)
         elif act_quant == "per_tensor":
             self.act_quant_name = "per_tensor"
-            self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_activation_per_tensor_absmax, n_bits=a_bits,method=a_method)
         elif act_quant == "per_channel":
             self.act_quant_name = "per_channel"
-            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits)
+            self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits,method=a_method)
         else:
             raise ValueError(f"Invalid act_quant: {act_quant}")
 
@@ -221,7 +240,7 @@ class QConv1d(nn.Conv1d):
     @staticmethod
     def from_float(
         module, weight_quant="per_channel", act_quant="per_token", quantize_output=False,
-        a_bits=8,w_bits=8,
+        a_bits=8,w_bits=8,a_method="minmax",w_method="minmax",
     ):
         assert isinstance(module, torch.nn.Conv1d)
         new_module = QConv1d(
@@ -234,17 +253,16 @@ class QConv1d(nn.Conv1d):
             bias=module.bias is not None,
             act_quant=act_quant,
             quantize_output=quantize_output,
-            a_bits=a_bits,
-            w_bits=w_bits
+            a_method=a_method,
+            w_method=w_method,
+            a_bits=a_bits,w_bits=w_bits,
         )
         if weight_quant == "per_channel":
             new_module.weight = quantize_weight_per_channel_absmax(
-                module.weight, n_bits=w_bits
-            )  # use 8-bit integer for weight
+                module.weight, n_bits=w_bits,method=w_method)  # use 8-bit integer for weight
         elif weight_quant == "per_tensor":
             new_module.weight = quantize_weight_per_tensor_absmax(
-                module.weight, n_bits=w_bits
-            )
+                module.weight, n_bits=w_bits,method=w_method)
         else:
             raise ValueError(f"Invalid weight_quant: {weight_quant}")
         new_module.weight_quant_name = weight_quant
@@ -258,7 +276,7 @@ class QConv1d(nn.Conv1d):
 
 def quantize_mamba(
     model, weight_quant="per_tensor", act_quant="per_token", quantize_bmm_input=True,
-    a_bits=8,w_bits=8,
+    a_bits=8,w_bits=8,a_method="minmax", w_method="minmax",
 ):
     # from model.mamba import MambaBlock
     from transformers.models.mamba.modeling_mamba import MambaMixer
@@ -266,24 +284,34 @@ def quantize_mamba(
     for name, m in model.named_modules():
         if isinstance(m, MambaMixer):
             m.in_proj = QLinear.from_float(
-                m.in_proj, weight_quant=weight_quant, 
-                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                m.in_proj, weight_quant=weight_quant, act_quant=act_quant,
+                a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
             )
             m.conv1d = QConv1d.from_float(
                 m.conv1d, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
             )
             m.x_proj = QLinear.from_float( #影响大
                 m.x_proj, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
             )
             m.dt_proj = QLinear.from_float(
                 m.dt_proj, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
             )
             m.out_proj = QLinear.from_float(  #影响大
                 m.out_proj, weight_quant=weight_quant, 
                 act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
             )
     return model
 
