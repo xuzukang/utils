@@ -104,7 +104,8 @@ class QLinear(nn.Module):
             self.act_quant_name = "per_channel"
             self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits,method=a_method)
         else:
-            raise ValueError(f"Invalid act_quant: {act_quant}")
+            self.act_quant_name = "none"
+            self.act_quant = lambda x: x
 
         if quantize_output:
             self.output_quant_name = self.act_quant_name
@@ -212,7 +213,8 @@ class QConv1d(nn.Conv1d):
             self.act_quant_name = "per_channel"
             self.act_quant = partial(quantize_weight_per_channel_absmax, n_bits=a_bits,method=a_method)
         else:
-            raise ValueError(f"Invalid act_quant: {act_quant}")
+            self.act_quant_name = "none"
+            self.act_quant = lambda x: x
 
         if quantize_output:
             self.output_quant_name = self.act_quant_name
@@ -323,7 +325,7 @@ def quantize_vim_torch(
     from vim.vim_torch import MambaBlock
 
     for name, m in model.named_modules():
-        if isinstance(m, Block):
+        if isinstance(m, MambaBlock):
             m.in_proj = QLinear.from_float(
                 m.in_proj, weight_quant=weight_quant, act_quant=act_quant,
                 a_bits=a_bits,w_bits=w_bits,
