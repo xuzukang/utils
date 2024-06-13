@@ -315,6 +315,65 @@ def quantize_mamba(
             )
     return model
 
+def quantize_vim_torch(
+    model, weight_quant="per_tensor", act_quant="per_token", quantize_bmm_input=True,
+    a_bits=8,w_bits=8,a_method="minmax", w_method="minmax",
+):
+    # from model.mamba import MambaBlock
+    from vim.vim_torch import MambaBlock
+
+    for name, m in model.named_modules():
+        if isinstance(m, Block):
+            m.in_proj = QLinear.from_float(
+                m.in_proj, weight_quant=weight_quant, act_quant=act_quant,
+                a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.conv1d = QConv1d.from_float(
+                m.conv1d, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.conv1d_b = QConv1d.from_float(
+                m.conv1d_b, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.x_proj = QLinear.from_float( #影响大
+                m.x_proj, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.x_proj_b = QLinear.from_float( #影响大
+                m.x_proj_b, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.dt_proj = QLinear.from_float(
+                m.dt_proj, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.dt_proj_b = QLinear.from_float(
+                m.dt_proj_b, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+            m.out_proj = QLinear.from_float(  #影响大
+                m.out_proj, weight_quant=weight_quant, 
+                act_quant=act_quant,a_bits=a_bits,w_bits=w_bits,
+                a_method=a_method,
+                w_method=w_method,
+            )
+    return model
+
 
 def quantize_opt(
     model, weight_quant="per_tensor", act_quant="per_tensor", quantize_bmm_input=True

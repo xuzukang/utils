@@ -20,7 +20,10 @@ from mpl_toolkits.mplot3d import Axes3D
 
 def plot_box_data_perchannel_fig(data_,path,axis=0):
     if isinstance(data_,torch.Tensor):
-        data = data_.cpu().numpy()
+        if data_.requires_grad:
+            data = data_.detach().cpu().numpy()
+        else:
+            data = data_.cpu().numpy()
     shape = data.shape
     if axis >= len(shape):
         raise ValueError("Axis should be less than data.shape")
@@ -40,7 +43,10 @@ def plot_box_data_perchannel_fig(data_,path,axis=0):
 
 def plot_bar_fig(data_,path):
     if isinstance(data_,torch.Tensor):
-        data = data_.cpu().numpy()
+        if data_.requires_grad:
+            data = data_.detach().cpu().numpy()
+        else:
+            data = data_.cpu().numpy()
     data_range = np.max(data) - np.min(data)
     bin_width = data_range / 30  # 设定每个区间的宽度
     bins = np.arange(np.min(data), np.max(data) + bin_width, bin_width)
@@ -59,7 +65,10 @@ def plot_bar_fig(data_,path):
 
 def plot_bar3d_fig(data_,path):
     if isinstance(data_,torch.Tensor):
-        data = data_.cpu().numpy()
+        if data_.requires_grad:
+            data = data_.detach().cpu().numpy()
+        else:
+            data = data_.cpu().numpy()
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
