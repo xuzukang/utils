@@ -65,10 +65,14 @@ def plot_bar_fig(data_,path):
 
 def plot_bar3d_fig(data_,path):
     if isinstance(data_,torch.Tensor):
+        data_ = data_.reshape(data_.shape[0],-1).abs()
         if data_.requires_grad:
             data = data_.detach().cpu().numpy()
         else:
             data = data_.cpu().numpy()
+    else:
+        data = data_
+
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
@@ -78,29 +82,46 @@ def plot_bar3d_fig(data_,path):
     # 生成X和Y的坐标
     _x = np.arange(x_len)
     _y = np.arange(y_len)
-    _xx, _yy = np.meshgrid(_x, _y)
+    
+    # meshgrid的参数顺序应该与数据存储的顺序一致：行 -> x轴, 列 -> y轴
+    _xx, _yy = np.meshgrid(_x, _y, indexing="ij")
     x, y = _xx.ravel(), _yy.ravel()
 
     # 数据展开为一维
     top = data.ravel()
     bottom = np.zeros_like(top)
-    width = depth = 1
+    
+    # 调整宽度和深度
+    width = depth = 0.2
+
+    # 使用颜色映射工具
+    colors = plt.cm.viridis(top / float(top.max()))
 
     # 绘制3D柱状图
-    ax.bar3d(x, y, bottom, width, depth, top, shade=True)
+    ax.bar3d(x, y, bottom, width, depth, top, shade=True, color=colors)
 
     # 设置轴标签和标题
     ax.set_title("bar3d plot")
-    ax.set_xlabel("dim0")
-    ax.set_ylabel("dim1")
-    ax.set_zlabel("value")
+    ax.set_xlabel("Column")
+    ax.set_ylabel("Row")
+    ax.set_zlabel("Value")
+    
+    # 添加颜色条
+    mappable = plt.cm.ScalarMappable(cmap='viridis')
+    mappable.set_array(top)
+    fig.colorbar(mappable, ax=ax, shrink=0.5, aspect=5)
+    
+    # 调整视角
+    ax.view_init(elev=30, azim=45)
 
     try:
         plt.tight_layout()
     except Exception as e:
         print(f"Warning: tight_layout failed with error: {e}")
+        
+    # 保存图像
     plt.savefig(path)
     plt.close()
-    print('saveing:  ', path)
+    print('saving:  ', path)
 
 
