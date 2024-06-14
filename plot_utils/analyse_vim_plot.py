@@ -394,6 +394,32 @@ def main(args):
         images = images.to(device, non_blocking=True)
         model(images)
         break
+    
+    if os.path.exists(f"data/analyse_fig/{quant_name}/"):
+        from utils.plot_utils.utils import find_images, concat_images
+        suffixes = count_suffixes(f"data/analyse_fig/{quant_name}/")
+        for ss in suffixes.keys():
+            image_paths = find_images(f"data/analyse_fig/{quant_name}/", "", ss)
+            concat_images(image_paths, 6, f"data/analyse_fig/{quant_name}/{ss}.png")
+
+def count_suffixes(directory):
+    """
+    统计指定文件夹中图片文件名中'mixer.'后面部分的后缀名称及其数量。
+    
+    参数:
+    - directory: 包含图片的文件夹路径。
+    
+    返回:
+    - 一个字典，键为后缀名称，值为该后缀名称出现的次数。
+    """
+    suffix_counts = {}
+    for filename in os.listdir(directory):
+        # 分割文件名以找到'mixer.'后面的部分
+        parts = filename.split('mixer.')
+        if len(parts) > 1:
+            suffix = parts[-1]  # 获取'mixer.'后面的部分
+            suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+    return suffix_counts
 
 
 def analyse_hook(module, input, output):  # 新增函数处理层的输出
@@ -409,14 +435,14 @@ def analyse_hook(module, input, output):  # 新增函数处理层的输出
         plot_bar3d_fig(weight, f"{save_dir}/{module_name}_weight_bar3d_data.jpg")
     
     # 分析输入
-    if input and isinstance(input[0], torch.Tensor):  # 确保有输入且为Tensor类型
+    if isinstance(input[0], torch.Tensor):  # 确保有输入且为Tensor类型
         temp_input = input[0]  # 假设只处理第一个输入
         plot_box_data_perchannel_fig(temp_input, f"{save_dir}/{module_name}_input_box_data_perchannel.jpg", axis=-1)
         plot_bar_fig(temp_input, f"{save_dir}/{module_name}_input_bar_data.jpg")
         plot_bar3d_fig(temp_input, f"{save_dir}/{module_name}_input_bar3d_data.jpg")
     
     # 分析输出
-    if output and isinstance(output, torch.Tensor):  # 或者 isinstance(outputs, tuple) if模块有多个输出
+    if isinstance(output, torch.Tensor):  # 或者 isinstance(outputs, tuple) if模块有多个输出
         plot_box_data_perchannel_fig(output, f"{save_dir}/{module_name}_output_box_data_perchannel.jpg", axis=-1)
         plot_bar_fig(output, f"{save_dir}/{module_name}_output_bar_data.jpg")
         plot_bar3d_fig(output, f"{save_dir}/{module_name}_output_bar3d_data.jpg")
@@ -425,7 +451,7 @@ def analyse_hook(module, input, output):  # 新增函数处理层的输出
 def register_hooks(model):
     global module_to_name 
     global quant_name
-    quant_name = "fp_data"
+    quant_name = "w8a8_data"
     module_to_name = {module: name for name, module in model.named_modules()}
     for layer in model.layers:
 

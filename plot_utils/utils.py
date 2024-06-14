@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from math import ceil
 from mpl_toolkits.mplot3d import Axes3D
+from PIL import Image
+import os
 
 # fig, ax = plt.subplots(figsize=(48, 6))  #创建图像并设置画布大小 plt.figure(figsize=figsize)
 # plt.tick_params(axis='both', which='major', labelsize=14)  # 设置主刻度标签的大小
@@ -30,6 +32,7 @@ def plot_box_data_perchannel_fig(data_,path,axis=0):
     permuted_data = np.moveaxis(data, axis, 0)
     reshaped_data = permuted_data.reshape(shape[axis], -1)
     plt.figure(figsize=(max(shape[axis] // 10, 6),6))
+    plt.title(path)
     plt.boxplot(reshaped_data.T)
     plt.xticks(range(0,shape[axis]+1,10))
     try:
@@ -38,7 +41,7 @@ def plot_box_data_perchannel_fig(data_,path,axis=0):
         print(f"Warning: tight_layout failed with error: {e}")
     plt.savefig(path)
     plt.close()
-    print('saveing:  ', path)
+    print('saving:  ', path)
 
 
 def plot_bar_fig(data_,path):
@@ -51,7 +54,7 @@ def plot_bar_fig(data_,path):
     bin_width = data_range / 30  # 设定每个区间的宽度
     bins = np.arange(np.min(data), np.max(data) + bin_width, bin_width)
     plt.hist(data.reshape(-1), bins=bins, edgecolor='black')
-    plt.title('hist plot')
+    plt.title(path)
     plt.xlabel("x_val")
     plt.ylabel("num")
     try:
@@ -60,8 +63,7 @@ def plot_bar_fig(data_,path):
         print(f"Warning: tight_layout failed with error: {e}") #用于自动调整子图参数，使图形中的子图、标签、标题等不重叠，并且整体布局更加紧凑美观
     plt.savefig(path)
     plt.close()
-    print('saveing:  ', path)
-
+    print('saving:  ', path)
 
 def plot_bar3d_fig(data_,path):
     if isinstance(data_,torch.Tensor):
@@ -101,7 +103,7 @@ def plot_bar3d_fig(data_,path):
     ax.bar3d(x, y, bottom, width, depth, top, shade=True, color=colors)
 
     # 设置轴标签和标题
-    ax.set_title("bar3d plot")
+    plt.title(path)
     ax.set_xlabel("Column")
     ax.set_ylabel("Row")
     ax.set_zlabel("Value")
@@ -124,4 +126,50 @@ def plot_bar3d_fig(data_,path):
     plt.close()
     print('saving:  ', path)
 
+def find_images(directory, prefix, suffix):
+    """
+    在指定目录中查找符合特定前缀和后缀的图片文件。
+    
+    参数:
+    - directory: 图片所在的目录。
+    - prefix: 文件名前缀。
+    - suffix: 文件名后缀。
+    
+    返回:
+    - 符合条件的图片文件路径列表。
+    """
+    files = os.listdir(directory)
+    selected_files = [os.path.join(directory, f) for f in files if f.startswith(prefix) and f.endswith(suffix)]
+    return selected_files
+def concat_images(image_paths, images_per_row, save_path):
+    """
+    将多张图片拼接成一张大图。
+
+    参数:
+    - image_paths: 图片路径的列表。
+    - images_per_row: 每行图片的数量。
+    - save_path: 拼接后的图片保存路径。
+    """
+    if not image_paths:
+        print("没有找到符合条件的图片。")
+        return
+    
+    # 加载第一张图片以获取单张图片的尺寸
+    with Image.open(image_paths[0]) as img:
+        img_width, img_height = img.size
+    
+    # 计算大图的尺寸
+    rows = (len(image_paths) + images_per_row - 1) // images_per_row
+    concat_image = Image.new('RGB', (images_per_row * img_width, rows * img_height))
+    
+    # 按顺序拼接图片
+    for idx, img_path in enumerate(image_paths):
+        row = idx // images_per_row
+        col = idx % images_per_row
+        with Image.open(img_path) as img:
+            concat_image.paste(img, (col * img_width, row * img_height))
+    
+    # 保存拼接后的图片
+    concat_image.save(save_path)
+    print(f"图片已拼接并保存到 {save_path}")
 
