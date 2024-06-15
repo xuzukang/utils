@@ -161,7 +161,7 @@ class QConv1d(nn.Conv1d):
         y = torch.functional.F.conv1d(q_x, self.weight, self.bias,
                                       padding=self.padding,
                                       groups=self.groups)
-        q_y = Dynamic_quantize(x, self.config.o_cfg)
+        q_y = Dynamic_quantize(y, self.config.o_cfg)
         return q_y
 
     @staticmethod
@@ -225,13 +225,16 @@ def quantize_vim_torch(
     model, config=AttrDict(dict(w_cfg=quant_config,
                                 i_cfg=quant_config,
                                 o_cfg="",
-                                matmu_cfg=quant_config))
+                                matmu_cfg=quant_config)),
+    quant_blocks=24,
 ):
     # from model.mamba import MambaBlock
     from vim.vim_torch import MambaBlock
 
     for name, m in model.named_modules():
         if isinstance(m, MambaBlock):
+            if int(name.split('.')[1]) >= quant_blocks:
+                continue 
             m.in_proj = QLinear.from_float(m.in_proj, config=config)
             m.conv1d = QConv1d.from_float(m.conv1d, config=config)
             m.conv1d_b = QConv1d.from_float(m.conv1d_b, config=config)

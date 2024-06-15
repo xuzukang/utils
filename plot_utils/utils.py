@@ -20,7 +20,34 @@ import os
 # plt.ylabel('Value') #设置y轴标签
 
 
-def plot_box_data_perchannel_fig(data_,path,axis=0):
+def plot_line_fig(data, path):
+    # 确保数据可以转换为一维数组
+    if isinstance(data, torch.Tensor):
+        if data.requires_grad:
+            data = data.detach().cpu().numpy()
+        else:
+            data = data.cpu().numpy()
+        
+    data = np.array(data).flatten()
+    # 绘制折线图
+    plt.plot(data, marker='o')  # 使用'o'标记每个数据点
+    
+    # 设置图表标题和坐标轴标签
+    plt.title(path)
+    plt.xlabel("Index")
+    plt.ylabel("Value")
+    
+    try:
+        plt.tight_layout()  # 自动调整布局
+    except Exception as e:
+        print(f"Warning: tight_layout failed with error: {e}")
+    
+    # 保存图表
+    plt.savefig(path)
+    plt.close()
+    print('saving:  ', path)
+
+def plot_box_data_perchannel_fig(data_,path,axis=-1):
     if isinstance(data_,torch.Tensor):
         if data_.requires_grad:
             data = data_.detach().cpu().numpy()
