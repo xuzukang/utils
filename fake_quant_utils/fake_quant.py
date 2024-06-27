@@ -98,6 +98,7 @@ class QLinear(nn.Module):
             module.bias is not None,
             config=config
         )
+
         new_module.weight.data = Dynamic_quantize(module.weight.data,config.w_cfg)
         if module.bias is not None:
             new_module.bias = module.bias
@@ -225,24 +226,71 @@ def quantize_vim_torch(
     model, config=AttrDict(dict(w_cfg=quant_config,
                                 i_cfg=quant_config,
                                 o_cfg="",
-                                matmu_cfg=quant_config)),
+                                matmul_cfg=quant_config)),
     quant_blocks=24,
 ):
     # from model.mamba import MambaBlock
     from vim.vim_torch import MambaBlock
 
+    ori_config = config
     for name, m in model.named_modules():
         if isinstance(m, MambaBlock):
             if int(name.split('.')[1]) >= quant_blocks:
                 continue 
+
+            
+            # if name.split('.')[1] in ["12",'13','14','15']:
+            #     q_cfg = AttrDict(dict(dim='',
+            #                  observer={'method':'minmax',
+            #                            "percentile":"0.999999",},
+            #                  n_bit=6,
+            #            )
+            #      )
+            #     config = AttrDict(dict(w_cfg=q_cfg,
+            #                     i_cfg=quant_config,
+            #                     o_cfg="",
+            #                     matmul_cfg=quant_config))
+            # else:
+            #     config=ori_config
+            
+            # if name.split('.')[1] not in ["23",]:
+            #     m.in_proj = QLinear.from_float(m.in_proj, config=config)
             m.in_proj = QLinear.from_float(m.in_proj, config=config)
+            
+            # if name.split('.')[1] not in ["23"]:
+            #     m.conv1d = QConv1d.from_float(m.conv1d, config=config)
             m.conv1d = QConv1d.from_float(m.conv1d, config=config)
+
+            # if name.split('.')[1] not in ["23"]:
+            #     m.conv1d_b = QConv1d.from_float(m.conv1d_b, config=config)
             m.conv1d_b = QConv1d.from_float(m.conv1d_b, config=config)
+
+            # if name.split('.')[1] not in ["23",]:
+            #     m.x_proj = QLinear.from_float(m.x_proj, config=config)
             m.x_proj = QLinear.from_float(m.x_proj, config=config)
+            
+            # if name.split('.')[1] not in ["23",]:
+            #     m.x_proj_b = QLinear.from_float(m.x_proj_b, config=config)
             m.x_proj_b = QLinear.from_float(m.x_proj_b, config=config)
+            
+            # if name.split('.')[1] not in ["23"]:
+            #     m.dt_proj = QLinear.from_float(m.dt_proj, config=config)
             m.dt_proj = QLinear.from_float(m.dt_proj, config=config)
+
+            # if name.split('.')[1] not in ["23"]:
+            #     m.dt_proj_b = QLinear.from_float(m.dt_proj_b, config=config)
             m.dt_proj_b = QLinear.from_float(m.dt_proj_b, config=config)
+    
+            # if name.split('.')[1] not in ["18",'19','23']:
+            #     m.out_proj = QLinear.from_float(m.out_proj, config=config)
             m.out_proj = QLinear.from_float(m.out_proj, config=config)
+
+            # if name.split('.')[1] not in ["5",]:
+                # m.matmul = QMatMul.from_float(m.matmul, config=config)
             m.matmul = QMatMul.from_float(m.matmul, config=config)
+
+            # if name.split('.')[1] not in ["0",'5','11','23']:
+                # m.matmul_b = QMatMul.from_float(m.matmul_b, config=config)
+            m.matmul_b = QMatMul.from_float(m.matmul_b, config=config)
 
     return model

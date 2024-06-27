@@ -53,6 +53,8 @@ def plot_box_data_perchannel_fig(data_,path,axis=-1):
             data = data_.detach().cpu().numpy()
         else:
             data = data_.cpu().numpy()
+    if len(data.shape)==3:
+        data = np.max(data,axis=0)
     shape = data.shape
     if axis >= len(shape):
         raise ValueError("Axis should be less than data.shape")

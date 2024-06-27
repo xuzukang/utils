@@ -24,6 +24,9 @@ from hmquant.tools.parser.onnx2seq.onnx_utils import BaseAnalyzer,\
 from hmquant.logger.logger import logger
 from copy import deepcopy
 
+def save_sequencer_2_pkl(sequencer, path,name):
+    sequencer.save_pkl(path, name)
+
 def load_pkl_model(path):
     # 打开文件并使用 pickle.load() 加载对象
     import pickle
