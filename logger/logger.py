@@ -88,7 +88,7 @@ LOG_CFG = {
     # loggers
     "loggers": {
         # 默认logger
-        "hmquant": {
+        "xuzukang": {
             "handlers": ["console", "default", "error", "eachLaunch"],
             "level": "DEBUG",
             "propagate": False,
@@ -97,7 +97,4 @@ LOG_CFG = {
 }
 
 logging.config.dictConfig(LOG_CFG)
-logger = logging.getLogger("hmquant")
-diff_logger = logger
-hardware_graph_optimizer_logger = logging.getLogger("hmquant.hardware_graph_optimizer")
-mix_quant_logger = logging.getLogger("hmquant.mix_quant")
+logger = logging.getLogger("xuzukang")

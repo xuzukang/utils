@@ -47,53 +47,6 @@ def plot_line_fig(data, path):
     plt.close()
     print('saving:  ', path)
 
-def plot_quantile_fig(data_,path,axis=-1):
-    # width = 1
-    torch.cuda.empty_cache()
-    height = len(data_)
-    fig,axes = plt.subplots(height,1,figsize=(16,4*height))
-    torch.cuda.synchronize(),torch.cuda.empty_cache()
-
-    if isinstance(data_,torch.Tensor):
-        if data_.requires_grad:
-            data = data_.detach().cpu().numpy()
-        else:
-            data = data_.cpu().numpy()
-    if len(data.shape)==3:
-        data = np.max(data,axis=0)
-    shape = data.shape
-    if axis >= len(shape):
-        raise ValueError("Axis should be less than data.shape")
-    permuted_data = np.moveaxis(data, axis, 0)
-    reshaped_data = permuted_data.reshape(shape[axis], -1)
-    
-    pmax = torch.amax(reshaped_data,dim=0).cpu().numpy()
-    p9999 = torch.quantile(reshaped_data,0.9999,dim=0).cpu().numpy()
-    p99 = torch.quantile(reshaped_data,0.99,dim=0).cpu().numpy()
-    p75 = torch.quantile(reshaped_data,0.75,dim=0).cpu().numpy()
-    p25 = torch.quantile(reshaped_data,0.25,dim=0).cpu().numpy()
-    p01 = torch.quantile(reshaped_data,0.01,dim=0).cpu().numpy()
-    p0001 = torch.quantile(reshaped_data,0.0001,dim=0).cpu().numpy()
-    pmin = torch.amin(reshaped_data,dim=0).cpu().numpy()
-    x_label_ids = np.arange(len(pmin))
-    del reshaped_data
-    torch.cuda.synchronize(),torch.cuda.empty_cache()
-    axes.plot(x_label_ids,pmin,color='blue',label='Min/Max')
-    axes.plot(x_label_ids,p9999,color='red',label='1/9999 Percentile')
-    axes.plot(x_label_ids,p99,color='purple',label='1/99 Percentile')
-    axes.plot(x_label_ids,p75,color='orange',label='25/75 Percentile')
-    axes.plot(x_label_ids,p25,color='orange')
-    axes.plot(x_label_ids,p01,color='purple')
-    axes.plot(x_label_ids,p0001,color='red',)
-    axes.plot(x_label_ids,pmax,color='blue')
-
-    axes.set_xlabel('Hidden dimension index')
-    axes.set_ylabel('Activation value')
-    axes.legend(loc='upper right')
-
-    fig.tight_layout(rect=[0,0.05,1,0.95])
-    fig.savefig(path,dpi=300)
-
 def plot_box_data_perchannel_fig(data_,path,axis=-1):
     if isinstance(data_,torch.Tensor):
         if data_.requires_grad:
@@ -118,6 +71,7 @@ def plot_box_data_perchannel_fig(data_,path,axis=-1):
     plt.savefig(path)
     plt.close()
     print('saving:  ', path)
+
 
 def plot_bar_fig(data_,path):
     if isinstance(data_,torch.Tensor):
@@ -216,7 +170,6 @@ def find_images(directory, prefix, suffix):
     files = os.listdir(directory)
     selected_files = [os.path.join(directory, f) for f in files if f.startswith(prefix) and f.endswith(suffix)]
     return selected_files
-
 def concat_images(image_paths, images_per_row, save_path):
     """
     将多张图片拼接成一张大图。
