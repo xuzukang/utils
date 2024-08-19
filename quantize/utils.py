@@ -86,12 +86,12 @@ def set_quant_state(self, weight_quant: bool = False, act_quant: bool = False):
         if isinstance(m, (QuantLinear, QuantMatMul,QuantConv1d,QuantConv2d)):
             m.set_quant_state(weight_quant, act_quant)
 
-
-def set_dynamic(self, dynamic: bool = True):
-    self.use_dynamic = dynamic
+def set_static_quant(self, static_quant: bool = False):
+    # setting weight quantization here does not affect actual forward pass
     for m in self.modules():
-        if isinstance(m, (UniformAffineQuantizer)):
-            m.dynamic = dynamic
+        if isinstance(m, UniformAffineQuantizer):
+            m.is_dynamic_quant = not static_quant
+
 
 def set_observing(self, observing: bool = True):
     self.use_observing = observing

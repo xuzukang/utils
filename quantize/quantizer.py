@@ -7,6 +7,8 @@ import tqdm
 import numpy as np
 import pdb
 import math
+from .observers.hist_observers import PercentileObserver, KLObserver, MSEObserver
+from .observers.minmax_observers import MinMaxObserver
 
 CLIPMIN = 1e-5
 
@@ -101,6 +103,11 @@ class UniformAffineQuantizer(nn.Module):
         self.group_size = group_size
         
         self.has_batch_dim = has_batch_dim
+        self.is_observing = False
+        self.is_dynamic_quant = True
+        self.observer = MinMaxObserver()
+        self.observer = PercentileObserver(percent=0.999999)
+        self.observered = False
 
     def change_n_bits(self, n_bits):
         self.n_bits = n_bits
@@ -151,13 +158,27 @@ class UniformAffineQuantizer(nn.Module):
         if self.metric == "fix0to1":
             return x.mul_(2**self.n_bits - 1).round_().div_(2**self.n_bits - 1)
 
-        if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
-            self.per_token_dynamic_calibration(x)
+        if not self.is_dynamic_quant:
+            if self.is_observing:
+                self.observer.update(x)
+                return x
+            else:
+                if not self.observered:
+                    xmin,xmax = self.observer.cal_min_max()
+                    self.assymmetric_cal_scale(xmin,xmax)
+                    self.observered = True
+                    self.observer = None
+                x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+                return x_dequant
+                
         else:
-            self.per_tensor_calibration(x)
+            if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
+                self.per_token_dynamic_calibration(x)
+            else:
+                self.dynamic_per_tensor_calibration(x)
 
-        x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
-        return x_dequant
+            x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+            return x_dequant
 
     def per_token_dynamic_calibration(self, x):
         if self.group_size:
@@ -208,7 +229,7 @@ class UniformAffineQuantizer(nn.Module):
             tensor, _ = func(tensor, dim=dim, keepdim=True)
         return tensor
     
-    def per_tensor_calibration(self,x):
+    def dynamic_per_tensor_calibration(self,x):
         if not self.has_batch_dim:
             xmin = x.min()
             xmax = x.max()
@@ -218,17 +239,23 @@ class UniformAffineQuantizer(nn.Module):
             xmin = self.MaxMin_except_first_dim(x,torch.min).view(shape)
             xmax = self.MaxMin_except_first_dim(x,torch.max).view(shape)
         if self.symmetric or self.disable_zero_point:
-            abs_max = torch.max(xmax.abs(), xmin.abs())
-            scale = abs_max / (2 ** (self.n_bits - 1) - 1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            self.round_zero_point = None
+            self.symmetric_cal_scale(xmin,xmax)
         else:
-            range_ = xmax - xmin
-            scale = range_ / (2**self.n_bits - 1)
-            self.scale = scale.clamp(min=CLIPMIN, max=1e4)
-            zero_point = -(xmin) / (self.scale)
-            self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
+            self.assymmetric_cal_scale(xmin,xmax)
 
+    def symmetric_cal_scale(self,xmin,xmax):
+        abs_max = torch.max(xmax.abs(), xmin.abs())
+        scale = abs_max / (2 ** (self.n_bits - 1) - 1)
+        self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+        self.round_zero_point = None
+        
+    def assymmetric_cal_scale(self,xmin,xmax):
+        dynamic_range = xmax - xmin
+        scale = dynamic_range / (2**self.n_bits - 1)
+        self.scale = scale.clamp(min=CLIPMIN, max=1e4)
+        zero_point = -(xmin) / (self.scale)
+        self.round_zero_point = zero_point.clamp(min=-1e4, max=1e4).round()
+    
     def normal_quantize(self, x, scales: torch.Tensor, mig_cof: torch.Tensor):
         s = (scales / mig_cof).max()
         s = s / (2**self.n_bits - 1)
@@ -249,23 +276,11 @@ class UniformAffineQuantizer(nn.Module):
         del self.scale
         del self.round_zero_point
         
-    def calibrate(self, x):
-        if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
-            self.per_token_dynamic_calibration(x)
-        else:
-            self.per_tensor_calibration(x)
-        
     def quant2int(self, x):
         if self.n_bits >= 16 or not self.enable:
             return x
         if self.metric == "fix0to1":
             return x.mul_(2**self.n_bits - 1).round_().div_(2**self.n_bits - 1)
-
-        # if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
-        #     self.per_token_dynamic_calibration(x)
-        # else:
-        #     self.per_tensor_calibration(x)
-
         if self.deficiency > 0:
             pad_zeros = torch.zeros(
                 (x.shape[0], self.deficiency), dtype=x.dtype, device=x.device
