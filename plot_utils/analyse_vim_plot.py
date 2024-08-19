@@ -43,11 +43,12 @@ import mlflow
 import pickle
 from utils.fake_quant_utils.function import QuantizedMatMul
 from utils.plot_utils.utils import plot_box_data_perchannel_fig, plot_bar_fig, plot_bar3d_fig
+from utils.config.attrdict import AttrDict
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
-    parser.add_argument('--batch-size', default=1, type=int)
+    parser.add_argument('--batch-size', default=100, type=int)
     parser.add_argument('--epochs', default=300, type=int)
     parser.add_argument('--bce-loss', action='store_true')
     parser.add_argument('--unscale-lr', action='store_true')
@@ -234,14 +235,6 @@ def get_args_parser():
 
     return parser
 
-class QuantCfg():
-    quantize = True
-    # quantize_bmm_input = True
-    w_bits = 8
-    a_bits = 8
-    hs_bits = 8
-    matmul_bits = 8
-    eval_len = 100
 
 def main(args):
     utils.init_distributed_mode(args)
@@ -371,36 +364,56 @@ def main(args):
         rmsnorm.weight = model.norm_f.weight
         model.norm_f = rmsnorm
 
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Test:'
-
     # switch to evaluation mode
     model.eval()
+    
 
 
-
-
-    cfg = QuantCfg
+    
     if cfg.quantize:
         from utils.fake_quant_utils.fake_quant import quantize_vim_torch
-        quantize_vim_torch(model,
-                           a_bits=cfg.a_bits,w_bits=cfg.w_bits,
-                           weight_quant="per_tensor", act_quant="per_tensor", 
-                           a_method="minmax", w_method="minmax",)
-        torch.matmul = QuantizedMatMul(cfg.matmul_bits).__call__
+        quantize_vim_torch(model,config=cfg)
+        
     register_hooks(model)
 
+    global input_name
+    input_name = "fig100"
+
+    # if os.path.exists(f"data/analyse_fig/{input_name}/{quant_name}/"):
+    #     from utils.plot_utils.utils import find_images, concat_images
+    #     suffixes = count_suffixes(f"data/analyse_fig/{input_name}/{quant_name}/")
+    #     for ss in suffixes.keys():
+    #         image_paths = find_images(f"data/analyse_fig/{input_name}/{quant_name}/", "", ss)
+    #         filter_images = [image for image in image_paths if image.split(".")[1].isdigit()]
+    #         sorted_images = sorted(filter_images,key=lambda x: int(x.split(".")[1]))
+    #         concat_images(sorted_images, 6, f"data/analyse_fig/{input_name}/{quant_name}_cat/{ss}")
+
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Test:'
     for images, target in metric_logger.log_every(data_loader_val, 10, header):
         images = images.to(device, non_blocking=True)
         model(images)
         break
     
-    if os.path.exists(f"data/analyse_fig/{quant_name}/"):
+    if os.path.exists(f"data/analyse_fig/{input_name}/{quant_name}/"):
         from utils.plot_utils.utils import find_images, concat_images
-        suffixes = count_suffixes(f"data/analyse_fig/{quant_name}/")
+        suffixes = count_suffixes(f"data/analyse_fig/{input_name}/{quant_name}/")
         for ss in suffixes.keys():
-            image_paths = find_images(f"data/analyse_fig/{quant_name}/", "", ss)
-            concat_images(image_paths, 6, f"data/analyse_fig/{quant_name}/{ss}.png")
+            image_paths = find_images(f"data/analyse_fig/{input_name}/{quant_name}/", "", ss)
+            filter_images = [image for image in image_paths if image.split(".")[1].isdigit()]
+            sorted_images = sorted(filter_images,key=lambda x: int(x.split(".")[1]))
+            os.makedirs(f"data/analyse_fig/{input_name}/{quant_name}_cat/", exist_ok=True)
+            concat_images(sorted_images, 6, f"data/analyse_fig/{input_name}/{quant_name}_cat/{ss}")
+
+q_cfg = AttrDict(dict(dim='', # '':pertensor
+                      observer={'method':'minmax',
+                                "percentile":"0.999999",},
+                      n_bit=8,
+                    ))
+cfg=AttrDict(dict(quantize=False,
+                    w_cfg=q_cfg,
+                    i_cfg=q_cfg,
+                    o_cfg="",))
 
 def count_suffixes(directory):
     """
@@ -421,49 +434,66 @@ def count_suffixes(directory):
             suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
     return suffix_counts
 
-
+from utils.fake_quant_utils.fake_quant import QLinear, QConv1d, QMatMul
 def analyse_hook(module, input, output):  # 新增函数处理层的输出
     module_name = module_to_name.get(module, "Unnamed module")
-    os.makedirs(f"data/analyse_fig/{quant_name}/", exist_ok=True)
-    save_dir = f"data/analyse_fig/{quant_name}/"
+    os.makedirs(f"data/analyse_fig/{input_name}/{quant_name}/", exist_ok=True)
+    save_dir = f"data/analyse_fig/{input_name}/{quant_name}"
     
-    # 分析权重（在前向传播前执行，但这里为了简洁放在一起展示）
-    if isinstance(module, (nn.Linear, nn.Conv1d)):
-        weight = module.weight.data
-        plot_box_data_perchannel_fig(weight, f"{save_dir}/{module_name}_weight_box_data_perchannel.jpg", axis=-1)
-        plot_bar_fig(weight, f"{save_dir}/{module_name}_weight_bar_data.jpg")
-        plot_bar3d_fig(weight, f"{save_dir}/{module_name}_weight_bar3d_data.jpg")
+    # # 分析权重（在前向传播前执行，但这里为了简洁放在一起展示）
+    # if isinstance(module, (QLinear, QConv1d)):
+    #     weight = module.weight.data
+    #     plot_box_data_perchannel_fig(weight, f"{save_dir}/{module_name}_weight_box_data_perchannel.jpg", axis=-1)
+    #     plot_bar_fig(weight, f"{save_dir}/{module_name}_weight_bar_data.jpg")
+    #     plot_bar3d_fig(weight, f"{save_dir}/{module_name}_weight_bar3d_data.jpg")
     
-    # 分析输入
-    if isinstance(input[0], torch.Tensor):  # 确保有输入且为Tensor类型
-        temp_input = input[0]  # 假设只处理第一个输入
-        plot_box_data_perchannel_fig(temp_input, f"{save_dir}/{module_name}_input_box_data_perchannel.jpg", axis=-1)
-        plot_bar_fig(temp_input, f"{save_dir}/{module_name}_input_bar_data.jpg")
-        plot_bar3d_fig(temp_input, f"{save_dir}/{module_name}_input_bar3d_data.jpg")
+    for i,temp_input in enumerate(input):
+        if isinstance(temp_input, torch.Tensor):  # 确保有输入且为Tensor类型
+            plot_box_data_perchannel_fig(temp_input[0], f"{save_dir}/{module_name}_input{i}_box_data_perchannel.jpg", axis=-1)
+            plot_bar_fig(temp_input[0], f"{save_dir}/{module_name}_input{i}_bar_data.jpg")
+            plot_bar3d_fig(temp_input[0], f"{save_dir}/{module_name}_input{i}_bar3d_data.jpg")
     
     # 分析输出
     if isinstance(output, torch.Tensor):  # 或者 isinstance(outputs, tuple) if模块有多个输出
-        plot_box_data_perchannel_fig(output, f"{save_dir}/{module_name}_output_box_data_perchannel.jpg", axis=-1)
-        plot_bar_fig(output, f"{save_dir}/{module_name}_output_bar_data.jpg")
-        plot_bar3d_fig(output, f"{save_dir}/{module_name}_output_bar3d_data.jpg")
+        plot_box_data_perchannel_fig(output[0], f"{save_dir}/{module_name}_output_box_data_perchannel.jpg", axis=-1)
+        plot_bar_fig(output[0], f"{save_dir}/{module_name}_output_bar_data.jpg")
+        plot_bar3d_fig(output[0], f"{save_dir}/{module_name}_output_bar3d_data.jpg")
 
+def analyse_hook_2(module, input, output):  # 新增函数处理层的输出
+    module_name = module_to_name.get(module, "Unnamed module")
+    os.makedirs(f"data/analyse_fig/{input_name}/{quant_name}/", exist_ok=True)
+    save_dir = f"data/analyse_fig/{input_name}/{quant_name}"
+    
+    for i,temp_input in enumerate(input):
+        if isinstance(temp_input, torch.Tensor):  # 确保有输入且为Tensor类型
+            plot_box_data_perchannel_fig(torch.amax(temp_input[0],dim=0), f"{save_dir}/{module_name}_input{i}_box_data_perchannel.jpg", axis=-1)
+            plot_bar_fig(torch.amax(temp_input[0],dim=0), f"{save_dir}/{module_name}_input{i}_bar_data.jpg")
+            plot_bar3d_fig(torch.amax(temp_input[0],dim=0), f"{save_dir}/{module_name}_input{i}_bar3d_data.jpg")
+    
+    # 分析输出
+    if isinstance(output, torch.Tensor):  # 或者 isinstance(outputs, tuple) if模块有多个输出
+        plot_box_data_perchannel_fig(torch.amax(output[0],dim=0), f"{save_dir}/{module_name}_output_box_data_perchannel.jpg", axis=-1)
+        plot_bar_fig(torch.amax(output[0],dim=0), f"{save_dir}/{module_name}_output_bar_data.jpg")
+        plot_bar3d_fig(torch.amax(output[0],dim=0), f"{save_dir}/{module_name}_output_bar3d_data.jpg")
 
 def register_hooks(model):
     global module_to_name 
     global quant_name
-    quant_name = "w8a8_data"
+    quant_name = "fp_data" if not cfg.quantize else "w8a8_data"
     module_to_name = {module: name for name, module in model.named_modules()}
-    for layer in model.layers:
+    for i,layer in enumerate(model.layers):
 
         # 新增后处理hook
-        layer.mixer.conv1d.register_forward_hook(analyse_hook)
-        layer.mixer.conv1d_b.register_forward_hook(analyse_hook)
-        layer.mixer.in_proj.register_forward_hook(analyse_hook)
+        # layer.mixer.conv1d.register_forward_hook(analyse_hook)
+        # layer.mixer.conv1d_b.register_forward_hook(analyse_hook)
+        # layer.mixer.in_proj.register_forward_hook(analyse_hook)
         layer.mixer.x_proj.register_forward_hook(analyse_hook)
         layer.mixer.x_proj_b.register_forward_hook(analyse_hook)
-        layer.mixer.dt_proj.register_forward_hook(analyse_hook)
-        layer.mixer.dt_proj_b.register_forward_hook(analyse_hook)
-        layer.mixer.out_proj.register_forward_hook(analyse_hook)
+        # layer.mixer.dt_proj.register_forward_hook(analyse_hook)
+        # layer.mixer.dt_proj_b.register_forward_hook(analyse_hook)
+        # layer.mixer.out_proj.register_forward_hook(analyse_hook)
+        # layer.mixer.matmul.register_forward_hook(analyse_hook_2)
+        # layer.mixer.matmul_b.register_forward_hook(analyse_hook_2)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
