@@ -51,7 +51,7 @@ def plot_quantile_fig(data_,path,axis=-1):
     # width = 1
     torch.cuda.empty_cache()
     height = len(data_)
-    fig,axes = plt.subplots(height,1,figsize=(16,4*height))
+    fig,axes = plt.subplots(1,1)
     torch.cuda.synchronize(),torch.cuda.empty_cache()
 
     if isinstance(data_,torch.Tensor):
@@ -66,7 +66,7 @@ def plot_quantile_fig(data_,path,axis=-1):
         raise ValueError("Axis should be less than data.shape")
     permuted_data = np.moveaxis(data, axis, 0)
     reshaped_data = permuted_data.reshape(shape[axis], -1)
-    
+    reshaped_data = torch.from_numpy(reshaped_data).to(data_.device).float()
     pmax = torch.amax(reshaped_data,dim=0).cpu().numpy()
     p9999 = torch.quantile(reshaped_data,0.9999,dim=0).cpu().numpy()
     p99 = torch.quantile(reshaped_data,0.99,dim=0).cpu().numpy()
@@ -78,14 +78,14 @@ def plot_quantile_fig(data_,path,axis=-1):
     x_label_ids = np.arange(len(pmin))
     del reshaped_data
     torch.cuda.synchronize(),torch.cuda.empty_cache()
-    axes.plot(x_label_ids,pmin,color='blue',label='Min/Max')
-    axes.plot(x_label_ids,p9999,color='red',label='1/9999 Percentile')
-    axes.plot(x_label_ids,p99,color='purple',label='1/99 Percentile')
-    axes.plot(x_label_ids,p75,color='orange',label='25/75 Percentile')
-    axes.plot(x_label_ids,p25,color='orange')
-    axes.plot(x_label_ids,p01,color='purple')
-    axes.plot(x_label_ids,p0001,color='red',)
-    axes.plot(x_label_ids,pmax,color='blue')
+    axes.plot(x_label_ids,p9999,color='red',label='1/9999 Percentile',linewidth=0.5)
+    axes.plot(x_label_ids,p99,color='purple',label='1/99 Percentile',linewidth=0.5)
+    axes.plot(x_label_ids,p75,color='orange',label='25/75 Percentile',linewidth=0.5)
+    axes.plot(x_label_ids,p25,color='orange',linewidth=0.5)
+    axes.plot(x_label_ids,p01,color='purple',linewidth=0.5)
+    axes.plot(x_label_ids,p0001,color='red',linewidth=0.5)
+    axes.plot(x_label_ids,pmax,color='blue',linewidth=0.5)
+    axes.plot(x_label_ids,pmin,color='blue',label='Min/Max',linewidth=0.5)
 
     axes.set_xlabel('Hidden dimension index')
     axes.set_ylabel('Activation value')
@@ -93,6 +93,8 @@ def plot_quantile_fig(data_,path,axis=-1):
 
     fig.tight_layout(rect=[0,0.05,1,0.95])
     fig.savefig(path,dpi=300)
+    plt.close()
+
 
 def plot_box_data_perchannel_fig(data_,path,axis=-1):
     if isinstance(data_,torch.Tensor):
@@ -246,6 +248,61 @@ def concat_images(image_paths, images_per_row, save_path):
             concat_image.paste(img, (col * img_width, row * img_height))
     
     # 保存拼接后的图片
-    concat_image.save(save_path)
-    print(f"图片已拼接并保存到 {save_path}")
+    try:
+        concat_image.save(save_path)
+        print(f"图片已拼接并保存到 {save_path}")
+    except Exception as e:
+        print(f"保存拼接后的图片时出错: {e}")
+
+def count_suffixes(directory):
+    """
+    统计指定文件夹中图片文件名中'mixer.'后面部分的后缀名称及其数量。
+    
+    参数:
+    - directory: 包含图片的文件夹路径。
+    
+    返回:
+    - 一个字典，键为后缀名称，值为该后缀名称出现的次数。
+    """
+    suffix_counts = {}
+    for filename in os.listdir(directory):
+        # 分割文件名以找到'mixer.'后面的部分
+        parts = filename.split('mixer.')
+        if len(parts) > 1:
+            suffix = parts[-1]  # 获取'mixer.'后面的部分
+            suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+    return suffix_counts
+
+
+def find_and_cat_figs_from_blocks(path):
+    if os.path.exists(path):
+        suffixes = count_suffixes(path)
+        for ss in suffixes.keys():
+            image_paths = find_images(path, "", ss)
+            filter_images = [image for image in image_paths if image.split(".")[0].split("/")[-1].isdigit()]
+            sorted_images = sorted(filter_images,key=lambda x: int(x.split(".")[0].split("/")[-1]))
+            os.makedirs(path+"_cat/", exist_ok=True)
+            concat_images(sorted_images, 6, path+f"_cat/{ss}")
+
+def delete_files_with_special_name(name,directory):
+    """
+    删除某个目录下名称包含 "conv" 的所有文件。
+    
+    参数:
+    directory (str): 要删除文件的目录路径。
+    """
+    # 遍历目录下的所有文件
+    for filename in os.listdir(directory):
+        # 检查文件名是否包含 "conv"
+        if name in filename:
+            # 构建完整的文件路径
+            file_path = os.path.join(directory, filename)
+            # 删除文件
+            os.remove(file_path)
+            print(f"已删除文件: {filename}")
+
+if __name__ == "__main__":
+    # delete_files_with_special_name("matmul","/data01/home/xuzk/workspace/mamba_quant_comp/model_llm/data/analyse_fig/fig/fp_data")
+    find_and_cat_figs_from_blocks('model_llm/data/analyse_fig/fig/fp_data')
+    pass
 
