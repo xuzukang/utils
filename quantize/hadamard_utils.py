@@ -1,19 +1,6 @@
-import torch
-
-def random_walsh_matrix(size, device):
-    H = random_hadamard_matrix(size, device)
-    data = torch.tensor([bin(i).count('1') for i in range(size)])
-    indices = torch.argsort(data)
-    indices_list = indices.tolist()
-    W = H[indices_list]
-    return W
-
-def random_hadamard_matrix(size, device):
-    Q = torch.randint(low=0, high=2, size=(size,)).to(torch.float64)
-    Q = Q * 2 - 1 # 生成随机的-1或1
-    Q = torch.diag(Q)
-    Q = matmul_hadU(Q).to(device)
-    return Q # 根据符号构造H矩阵
+import torch, math
+import fast_hadamard_transform
+# Adapted from https://github.com/Cornell-RelaxML/quip-sharp/blob/main/lib/utils/matmul_had.py
 
 def get_hadK(n, transpose=False):
     hadK, K = None, None
@@ -67,6 +54,7 @@ def get_hadK(n, transpose=False):
 
     return hadK, K
 
+
 def matmul_hadU(X, transpose=False):
     n = X.shape[-1]
     hadK, K = get_hadK(n, transpose)
@@ -89,6 +77,92 @@ def matmul_hadU(X, transpose=False):
         input = hadK.view(1, K, K).to(input) @ input
 
     return input.view(X.shape) / torch.tensor(n).sqrt()
+
+
+def matmul_hadUt(X):
+    return matmul_hadU(X, transpose=True)
+
+def random_hadamard_matrix(size, device):
+    # See https://cornell-relaxml.github.io/quip-sharp/ , Section "Randomized Hadamard Transformation"
+    Q = torch.randint(low=0, high=2, size=(size,)).to(torch.float64)
+    Q = Q * 2 - 1 # 生成随机的-1或1
+    Q = torch.diag(Q)
+    return matmul_hadU(Q).to(device) # 根据符号构造H矩阵
+
+def matmul_hadU_cuda(X, hadK, K):
+    n = X.shape[-1]
+    if K == 1:
+        return fast_hadamard_transform.hadamard_transform(X.contiguous(), 1.0/torch.tensor(n).sqrt()) 
+    # if transpose:
+    #     hadK = hadK.T.contiguous()
+    input = X.view(-1, K, n // K)
+    input = fast_hadamard_transform.hadamard_transform(input.contiguous(), 1.0/torch.tensor(n).sqrt())
+    input = hadK.to(input.device).to(input.dtype) @ input
+    return input.reshape(X.shape)
+
+
+def matmul_hadUt_cuda(X, hadK, K):
+    return matmul_hadU_cuda(X, hadK, K, transpose=True)
+
+
+def apply_exact_had_to_linear(module, had_dim=-1, output=False, down_proj_dim=1, partial_o = False):
+    in_features, out_features = module.in_features, module.out_features
+    
+    if had_dim != -1:
+        assert is_pow2(had_dim), "Hadamard dimension must be a power of 2!"
+    
+    W_ = module.weight.data
+    dtype = W_.dtype
+    dev = W_.device
+    init_shape = W_.shape
+    W_ = W_.float().cuda()
+    
+    if module.bias is not None: # for qwen v_proj
+        B_ = module.bias.data
+        B_ = B_.float().cuda()
+
+    if had_dim == -1:
+        if output: # outout=True 一般表示v_proj矩阵.  对输出维度做一次H变换
+            had_K, K = get_hadK(out_features)
+            W_ = matmul_hadU_cuda(W_.t(), had_K, K).t()
+
+        if not output: # output=False 说明对输入维度做了一次H变换
+            if down_proj_dim != 1:
+                transposed_shape = W_.shape
+                had_K, K = get_hadK(transposed_shape[1]//down_proj_dim ) # 根据输入特征得到一个随机的H变换矩阵
+                W_ = matmul_hadU_cuda(W_.reshape(transposed_shape[0], -1, down_proj_dim).transpose(1,2).contiguous(), had_K, K).transpose(1,2).reshape(transposed_shape[0],-1)
+            else:
+                if not partial_o:
+                    had_K, K = get_hadK(in_features) # 根据输入特征得到一个随机的H变换矩阵
+                    W_ = matmul_hadU_cuda(W_, had_K, K)
+                else:
+                    transposed_shape = W_.shape
+                    had_K, K = get_hadK(128) # 根据输入特征得到一个随机的H变换矩阵
+                    W_ = matmul_hadU_cuda(W_.reshape(-1, transposed_shape[-1]//128, 128), had_K, K).reshape(transposed_shape)
+    else:
+        # Apply Hadamard to the last had_dim chunks of the weights # 对权重的最后一个head-dim进行分块并且使用H变换
+        if output:
+            W_ = W_.t() # (ic,oc)
+            transposed_shape = W_.shape
+            W_ = fast_hadamard_transform.hadamard_transform(
+                W_.reshape(-1, transposed_shape[-1]//had_dim, had_dim),  # (4096,32,128)
+                scale=1/math.sqrt(had_dim)
+                ).reshape(transposed_shape).t()
+            if module.bias is not None: # for qwen v_proj
+                B_ = B_.t()
+                transposed_shape = B_.shape
+                B_ = fast_hadamard_transform.hadamard_transform(
+                    B_.reshape(-1, transposed_shape[-1]//had_dim, had_dim), 
+                    scale=1/math.sqrt(had_dim)
+                    ).reshape(transposed_shape).t()
+        else:
+            raise NotImplementedError("Not implemented (or tested) yet!")
+            n = W_.shape[1]
+            W_ = hadamard_transform(W_.reshape(-1, n//had_dim, had_dim), scale=1/math.sqrt(had_dim)).reshape(init_shape)
+    module.weight.data = W_.to(device=dev, dtype=dtype)
+    if module.bias is not None: # for qwen v_proj
+        module.bias.data = B_.to(device=dev,dtype=dtype)
+
 
 
 def is_pow2(n):
@@ -4139,4 +4213,3 @@ def get_had172():
          -1, +1, -1, +1, +1, +1, -1, +1, +1, -1, -1, +1, +1, -1, +1, +1, +1, -1, +1, -1, +1, +1, +1, +1, -1, -1, +1, +1,
          -1, -1, -1, +1, ],
     ])
-

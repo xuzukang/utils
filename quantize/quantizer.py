@@ -43,7 +43,10 @@ class UniformAffineQuantizer(nn.Module):
         disable_zero_point=False,
         rescale=False,
         rescale_limit=False,
-        has_batch_dim = False
+        has_batch_dim = False,
+        is_weight=False,
+        observe="minmax",
+        percent = 0.999999,
     ):
         """
         support cluster quantize
@@ -105,9 +108,16 @@ class UniformAffineQuantizer(nn.Module):
         self.has_batch_dim = has_batch_dim
         self.is_observing = False
         self.is_dynamic_quant = True
-        self.observer = MinMaxObserver()
-        self.observer = PercentileObserver(percent=0.999999)
+        granularity = 'dim{}'.format(per_channel_axes[0]) if len(per_channel_axes) > 0 else 'tensor'
+        
+        if observe == "percentile":
+            self.observer = PercentileObserver(percent=percent,granularity=granularity)
+        else:
+            self.observer = MinMaxObserver(granularity=granularity)
+ 
         self.observered = False
+        
+        self.is_weight = is_weight
 
     def change_n_bits(self, n_bits):
         self.n_bits = n_bits
@@ -157,28 +167,59 @@ class UniformAffineQuantizer(nn.Module):
             return x
         if self.metric == "fix0to1":
             return x.mul_(2**self.n_bits - 1).round_().div_(2**self.n_bits - 1)
-
-        if not self.is_dynamic_quant:
-            if self.is_observing:
-                self.observer.update(x)
-                return x
-            else:
-                if not self.observered:
+        
+        if self.is_weight:#权重量化，没有observe过程
+            if True:#not self.is_dynamic_quant:
+                if  self.is_observing:
+                    return x
+                if self.observer is not None:
+                    self.observer.update(x)
                     xmin,xmax = self.observer.cal_min_max()
                     self.assymmetric_cal_scale(xmin,xmax)
-                    self.observered = True
+                    self.scale = self.expand_scale_shape_2_x(x, self.scale)
+                    self.round_zero_point = self.expand_scale_shape_2_x(x, self.round_zero_point)
                     self.observer = None
                 x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
-                return x_dequant
-                
-        else:
-            if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
-                self.per_token_dynamic_calibration(x)
+                return x_dequant.type_as(x)
+            # else:
+            #     if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
+            #         self.per_token_dynamic_calibration(x)
+            #     else:
+            #         self.dynamic_per_tensor_calibration(x)
+            #     x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+            #     return x_dequant
+        else:#激活量化
+            if not self.is_dynamic_quant:
+                if self.is_observing:
+                    self.observer.update(x)
+                    return x.type_as(x)
+                else:
+                    if not self.observered:
+                        xmin,xmax = self.observer.cal_min_max()
+                        self.assymmetric_cal_scale(xmin,xmax)
+                        self.scale = self.expand_scale_shape_2_x(x, self.scale)
+                        self.round_zero_point = self.expand_scale_shape_2_x(x, self.round_zero_point)
+                        self.observered = True
+                        self.observer = None
+                    x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+                    return x_dequant.type_as(x)
+                    
             else:
-                self.dynamic_per_tensor_calibration(x)
+                if self.dynamic_method == "per_token" or self.dynamic_method == "per_channel":
+                    self.per_token_dynamic_calibration(x)
+                else:
+                    self.dynamic_per_tensor_calibration(x)
 
-            x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
-            return x_dequant
+                x_dequant = self.fake_quant(x, self.scale, self.round_zero_point)
+                return x_dequant.type_as(x)
+
+    def expand_scale_shape_2_x(self, x, scale):
+        if self.per_channel_axes:
+            dim=self.per_channel_axes[0]
+            for i in range(len(x.shape)):
+                if i != dim:
+                    scale = scale.unsqueeze(i)
+        return scale
 
     def per_token_dynamic_calibration(self, x):
         if self.group_size:

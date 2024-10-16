@@ -19,6 +19,7 @@ class QuantLinear(nn.Linear):
         weight_quant_params: dict = {"dynamic_method":"per_tensor"},
         act_quant_params: dict = {"dynamic_method":"per_tensor"},
         disable_input_quant=False,
+        observe = "minmax",
     ):
         super().__init__(org_module.in_features,org_module.out_features)
         self.fwd_kwargs = dict()
@@ -34,9 +35,9 @@ class QuantLinear(nn.Linear):
         self.use_weight_quant = False
         self.use_act_quant = False
         # initialize quantizer
-        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
+        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape,is_weight=True,observe=observe)
         if not disable_input_quant:
-            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True)
+            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True,observe=observe)
         else:
             self.act_quantizer = None
 
@@ -52,7 +53,9 @@ class QuantLinear(nn.Linear):
             weight = self.temp_weight
             bias = self.temp_bias
         elif self.use_weight_quant:
-            if not self.weight_quantized:
+            if self.weight_quantizer.is_observing:
+                weight = self.weight
+            elif not self.weight_quantized:
                 self.weight = torch.nn.Parameter(self.weight_quantizer(self.weight))
                 weight = self.weight
                 self.weight_quantized = True
@@ -66,8 +69,9 @@ class QuantLinear(nn.Linear):
         if self.use_act_quant and not self.disable_input_quant:
             input = self.act_quantizer(input)
         
+        if bias is not None:bias = bias.to(weight)
         out = self.fwd_func(
-                input, weight, bias, **self.fwd_kwargs)
+                input.to(weight), weight, bias, **self.fwd_kwargs)
 
 
         return out

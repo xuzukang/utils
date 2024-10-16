@@ -11,6 +11,21 @@ import os
 import sys
 from .quantizer import UniformAffineQuantizer
 
+class NoHookContext:
+    def __init__(self, module):
+        self.module = module
+        self.hooks = []
+
+    def __enter__(self):
+        # 保存hooks
+        for hook_id in list(self.module._forward_hooks.keys()):
+            self.hooks.append((hook_id, self.module._forward_hooks.pop(hook_id)))
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # 恢复hooks
+        for hook_id, hook in self.hooks:
+            self.module._forward_hooks[hook_id] = hook
+
 class Logger(object):
     def __init__(self, folder="logs"):
         # 获取当前时间并格式化为字符串
@@ -82,7 +97,7 @@ def set_quant_state(self, weight_quant: bool = False, act_quant: bool = False):
     # setting weight quantization here does not affect actual forward pass
     self.use_weight_quant = weight_quant
     self.use_act_quant = act_quant
-    for m in self.modules():
+    for name,m in self.named_modules():
         if isinstance(m, (QuantLinear, QuantMatMul,QuantConv1d,QuantConv2d)):
             m.set_quant_state(weight_quant, act_quant)
 
@@ -92,9 +107,15 @@ def set_static_quant(self, static_quant: bool = False):
         if isinstance(m, UniformAffineQuantizer):
             m.is_dynamic_quant = not static_quant
 
+def set_static_quant_weight(self, static_quant: bool = False):
+    # setting weight quantization here does not affect actual forward pass
+    for name, m in self.named_modules():
+        if "weight" in name:
+            if isinstance(m, UniformAffineQuantizer):
+                m.is_dynamic_quant = not static_quant
 
 def set_observing(self, observing: bool = True):
     self.use_observing = observing
-    for m in self.modules():
+    for name, m in self.named_modules():
         if isinstance(m, (UniformAffineQuantizer)):
            m.is_observing = observing

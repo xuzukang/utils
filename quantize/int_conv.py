@@ -14,6 +14,7 @@ class QuantConv1d(nn.Conv1d):
         org_module: nn.Conv1d,
         weight_quant_params: dict = {"dynamic_method":"per_tensor"},
         act_quant_params: dict = {"dynamic_method":"per_tensor"},
+        observe = "minmax",
         disable_input_quant=False,
     ):
         super().__init__(org_module.in_channels,
@@ -34,9 +35,9 @@ class QuantConv1d(nn.Conv1d):
         self.use_weight_quant = False
         self.use_act_quant = False
         # initialize quantizer
-        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
+        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape,is_weight=True,observe=observe)
         if not disable_input_quant:
-            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True)
+            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True,observe=observe)
         else:
             self.act_quantizer = None
 
@@ -47,24 +48,31 @@ class QuantConv1d(nn.Conv1d):
         self.padding = org_module.padding
         self.dilation = org_module.dilation
         self.groups = org_module.groups
+        
+        self.weight_quantized = False
 
      
     def forward(self, input: torch.Tensor):
         if self.use_temporary_parameter:
             weight = self.temp_weight
-            bias = self.temp_bias
+            bias = self.temp_bias.to(weight.dtype)
         elif self.use_weight_quant:
-            weight = self.weight_quantizer(self.weight)
-            bias = self.bias
+            if not self.weight_quantized:
+                self.weight = torch.nn.Parameter(self.weight_quantizer(self.weight))
+                weight = self.weight
+                self.weight_quantized = True
+            else:
+                weight = self.weight
+            bias = self.bias.to(weight.dtype)
         else:
             weight = self.weight
-            bias = self.bias
+            bias = self.bias.to(weight.dtype)
 
         if self.use_act_quant and not self.disable_input_quant:
             input = self.act_quantizer(input)
         
         out = self.fwd_func(
-                input, weight, bias,
+                input.to(weight.dtype), weight, bias.to(weight.dtype),
                 self.stride,
                 self.padding,
                 self.dilation,
@@ -89,6 +97,7 @@ class QuantConv2d(nn.Conv2d):
         weight_quant_params: dict = {"dynamic_method":"per_tensor"},
         act_quant_params: dict = {"dynamic_method":"per_tensor"},
         disable_input_quant=False,
+        observe = "minmax",
     ):
         super().__init__(org_module.in_channels, org_module.out_channels, org_module.kernel_size,)
         self.fwd_kwargs = dict()
@@ -102,9 +111,9 @@ class QuantConv2d(nn.Conv2d):
         self.use_weight_quant = False
         self.use_act_quant = False
         # initialize quantizer
-        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
+        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape,is_weight=True,observe=observe)
         if not disable_input_quant:
-            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True)
+            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True,observe=observe)
         else:
             self.act_quantizer = None
 
@@ -159,6 +168,7 @@ class QuantConv3d(nn.Conv3d):
         weight_quant_params: dict = {"dynamic_method":"per_tensor"},
         act_quant_params: dict = {"dynamic_method":"per_tensor"},
         disable_input_quant=False,
+        observe = "minmax",
     ):
         super().__init__(org_module.in_channels, org_module.out_channels, org_module.kernel_size,)
         self.fwd_kwargs = dict()
@@ -172,9 +182,9 @@ class QuantConv3d(nn.Conv3d):
         self.use_weight_quant = False
         self.use_act_quant = False
         # initialize quantizer
-        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape)
+        self.weight_quantizer = UniformAffineQuantizer(**weight_quant_params,shape=org_module.weight.shape,is_weight=True,observe=observe)
         if not disable_input_quant:
-            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True)
+            self.act_quantizer = UniformAffineQuantizer(**act_quant_params,has_batch_dim=True,observe=observe)
         else:
             self.act_quantizer = None
 

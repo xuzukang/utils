@@ -707,7 +707,11 @@ def gptq_fwrd_vim(model, dataloader, dev, args):
 
     quantizers = {}
     sequential = [
-                ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.x_proj_b', 'mixer.dt_proj_b', 'mixer.out_proj']
+                # ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.x_proj_b', 'mixer.dt_proj_b', 'mixer.out_proj']
+                ['mixer.in_proj_states', 'mixer.in_proj_gates',
+                 'mixer.x_proj_C',"mixer.x_proj_B","mixer.x_proj_dt", 'mixer.dt_proj', 
+                 'mixer.x_proj_C_b',"mixer.x_proj_B_b","mixer.x_proj_dt_b", 'mixer.dt_proj_b', 
+                 'mixer.out_proj']
             ]
     for i in range(len(layers)):
         print(f'\nLayer {i}:', flush=True, end=' ')
@@ -720,14 +724,14 @@ def gptq_fwrd_vim(model, dataloader, dev, args):
             for name in subset:
                 print(f'{name}', end='  ', flush=True)
                 layer_weight_bits = args.w_bits
-                layer_weight_sym = True
+                layer_weight_sym = False
                 # if 'lm_head' in name:
                 #     layer_weight_bits = 16
                 #     continue
                 gptq[name] = GPTQ(subset[name])
                 gptq[name].quantizer = WeightQuantizer()
                 gptq[name].quantizer.configure(
-                    layer_weight_bits, perchannel=False, sym=layer_weight_sym, mse=True
+                    layer_weight_bits, perchannel=args.perchannel, sym=layer_weight_sym, mse=True
                 )
 
             def add_batch(name):
@@ -916,6 +920,11 @@ def gptq_fwrd_mamba3d(model, dataloader, dev, args):
     '''
     logging.info('-----GPTQ Quantization-----')
     
+    #先过一遍网络，为了网络中的一些hadamard旋转和smooth生效
+    for i, batch in enumerate(dataloader):
+        model.test_step(batch)
+        break
+    
     backbone = model.backbone
 
     layers = backbone.layers
@@ -959,10 +968,10 @@ def gptq_fwrd_mamba3d(model, dataloader, dev, args):
 
     quantizers = {}
     sequential = [
-                ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.out_proj']
+                # ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.out_proj']
+                ["mixer.in_proj_states", "mixer.in_proj_gates", "mixer.x_proj_B","mixer.x_proj_C",
+                 "mixer.x_proj_dt","mixer.dt_proj","mixer.out_proj"]
             ]
-    
-
     
     order = torch.load("./work_dirs/order.pth")
     n_pos_dim = torch.load("./work_dirs/n_pos_dim.pth")
@@ -971,6 +980,7 @@ def gptq_fwrd_mamba3d(model, dataloader, dev, args):
     for i in range(len(layers)):
         print(f'\nLayer {i}:', flush=True, end=' ')
         layer = layers[i].to(dev)
+        
         full = find_qlayers(layer, layers=[torch.nn.Linear])
         for names in sequential:
             subset = {n: full[n] for n in names}
@@ -1241,7 +1251,10 @@ def gptq_fwrd_llm(model, dataloader, dev, args):
 
     quantizers = {}
     sequential = [
-                ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.out_proj']
+                # ['mixer.in_proj', 'mixer.x_proj', 'mixer.dt_proj', 'mixer.out_proj']
+                ['mixer.in_proj_states', 'mixer.in_proj_gates',
+                 'mixer.x_proj_c',"mixer.x_proj_b","mixer.x_proj_dt", 'mixer.dt_proj',
+                 'mixer.out_proj']
             ]
     
 
@@ -1268,7 +1281,7 @@ def gptq_fwrd_llm(model, dataloader, dev, args):
                 gptq[name] = GPTQ(subset[name])
                 gptq[name].quantizer = WeightQuantizer()
                 gptq[name].quantizer.configure(
-                    layer_weight_bits, perchannel=False, sym=layer_weight_sym, mse=True
+                    layer_weight_bits, perchannel=True, sym=layer_weight_sym, mse=True
                 )
         
 

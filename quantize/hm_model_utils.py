@@ -25,7 +25,14 @@ def fuse_layer_norms(model):
         fuse_ln_linear(layer.norm, [layer.mixer.in_proj])   
         with torch.no_grad(): 
             layer.norm.weight.fill_(1.)
+
+def fuse_layer_norms_2(model):
    
+    layers = model.layers
+    for layer in layers:
+        fuse_ln_linear(layer.norm, [layer.mixer.in_proj_states,layer.mixer.in_proj_gates])   
+        with torch.no_grad(): 
+            layer.norm.weight.fill_(1.)
 
 def fuse_ln_linear(layernorm: torch.nn.Module, linear_layers: typing.Iterable[torch.nn.Linear]) -> None:
     """
@@ -87,14 +94,14 @@ class RQuantLinear(QuantLinear):
 
 
         if self.use_weight_quant:
-            self.weight = self.weight_quantizer(self.weight)
+            self.weight.data = self.weight_quantizer(self.weight)
 
         
         if self.use_act_quant and not self.disable_input_quant:
             input = self.act_quantizer(input)
-        
+        if self.bias is not None:self.bias = self.bias.to(self.weight)
         out = self.fwd_func(
-                input, self.weight, self.bias, **self.fwd_kwargs)
+                input.to(self.weight), self.weight, self.bias, **self.fwd_kwargs)
         
     
         return out

@@ -431,7 +431,15 @@ class MatMul(nn.Module):
     def forward(self, x, y):
         return torch.matmul(x, y)
 
-
+class MulAdd(nn.Module):
+    def __init__(self,add=0) -> None:
+        super().__init__()
+        self.add_val = add
+    def forward(self, x, y):
+        return torch.addcmul(self.add_val, x, y)
+        # return torch.mul(x, self.mul_val) + self.add_val
+        
+        
 class Squeeze(nn.Module):
     def __init__(self, axes=None):
         super().__init__()

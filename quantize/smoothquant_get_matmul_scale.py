@@ -23,6 +23,101 @@ import os
 import sys
 ROOT = os.getcwd()
 sys.path.append(str(ROOT)+"/vim_quant")
+torch.cuda.set_device(7)
+
+def get_matmul_act_scales_S3(model, dataloader, num_samples=128):
+    model.eval()
+    device = next(model.parameters()).device
+    act_scales = {}
+    from quantize.int_matmul import QuantMatMul
+    def stat_tensor(name, tensor):
+        tmp = tensor.permute(0,1,3,2)
+        hidden_dim = tmp.shape[-1]
+        tmp = tmp.reshape(-1, hidden_dim).abs().detach()
+        # comming_max = torch.max(tmp, dim=0)[0].float().cpu()
+        comming_max = torch.quantile(tmp, 0.999999, dim=0).float().cpu()
+        if name in act_scales:
+            act_scales[name] = torch.max(act_scales[name], comming_max)
+        else:
+            act_scales[name] = comming_max
+
+    def stat_input_hook(m, x, y, name):
+        if isinstance(x, tuple):
+            x = x[0]
+        stat_tensor(name, x)
+
+    hooks = []
+    for name, m in model.named_modules():
+        if isinstance(m, QuantMatMul):
+            hooks.append(
+                m.register_forward_hook(
+                    functools.partial(stat_input_hook, name=name)))
+
+    subset_dataloader = itertools.islice(dataloader, num_samples)
+    for batch in tqdm(subset_dataloader,desc="Processing batches", dynamic_ncols=True, leave=True):
+        if isinstance(batch, list):
+            images, target = batch
+        else:
+            images, target = batch["image"], batch["label"]
+        model(images.to(device))
+
+    for h in hooks:
+        h.remove()
+
+    return act_scales
+def get_matmul_act_scales_S4(model, dataloader, num_samples=128):
+    model.eval()
+    device = next(model.parameters()).device
+    act_scales_x1 = {}
+    act_scales_x2 = {}
+    act_scales = {}
+    from quantize.int_matmul import QuantMatMul
+    def stat_tensor(name, tensor):
+        x1 = tensor[0]
+        hidden_dim = x1.shape[-1]
+        x1 = x1.reshape(-1, hidden_dim).abs().detach()
+        comming_max = torch.max(x1, dim=0)[0].float().cpu()
+        # comming_max = torch.quantile(tmp, 0.999999, dim=0).float().cpu()
+        if name in act_scales_x1:
+            act_scales_x1[name] = torch.max(act_scales_x1[name], comming_max)
+        else:
+            act_scales_x1[name] = comming_max
+
+        x2 = tensor[1].permute(0,1,3,2)
+        hidden_dim = x2.shape[-1]
+        x2 = x2.reshape(-1, hidden_dim).abs().detach()
+        comming_max = torch.max(x2, dim=0)[0].float().cpu()
+        # comming_max = torch.quantile(tmp, 0.999999, dim=0).float().cpu()
+        if name in act_scales_x2:
+            act_scales_x2[name] = torch.max(act_scales_x2[name], comming_max)
+        else:
+            act_scales_x2[name] = comming_max
+
+    def stat_input_hook(m, x, y, name):
+        stat_tensor(name, x)
+
+    hooks = []
+    for name, m in model.named_modules():
+        if isinstance(m, QuantMatMul):
+            hooks.append(
+                m.register_forward_hook(
+                    functools.partial(stat_input_hook, name=name)))
+
+    subset_dataloader = itertools.islice(dataloader, num_samples)
+    for batch in tqdm(subset_dataloader,desc="Processing batches", dynamic_ncols=True, leave=True):
+        if isinstance(batch, list):
+            images, target = batch
+        else:
+            images, target = batch["image"], batch["label"]
+        model(images.to(device))
+
+    for h in hooks:
+        h.remove()
+
+    alpha = 0.5
+    for key,val in act_scales_x1.items():
+        act_scales[key] = ((val.pow(alpha) / act_scales_x2[key].pow(1 - alpha)).clamp(min=1e-5).to(val))
+    return act_scales
 
 
 
@@ -86,17 +181,28 @@ def parse_args():
 @torch.no_grad()
 def vim_generate_matmul_scale():
     from timm.models import create_model
-    import vim_quant.vim.models_mamba
-    from vim_quant.vim.datasets import build_dataset
+    import model_vim_quant.vim.models_mamba
+    from model_vim_quant.vim.datasets import build_dataset
     args = parse_args()
+    # torch.cuda.set_device("cuda:6")
     
-    # resum_path = "vim_quant/saved_checkpoint/vim_t_midclstok_76p1acc.pth"
+    # resum_path = "model_vim_quant/saved_checkpoint/vim_t_midclstok_76p1acc.pth"
     # model_name = "vim_tiny_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
     # net_name = "vim-tiny"
-    resum_path = "vim_quant/saved_checkpoint/vim_s_midclstok_80p5acc.pth"
-    model_name = "vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
-    net_name = "vim-small"
-    output_path = "vim_quant/saved_checkpoint"
+    resum_path = "model_vim_quant/saved_checkpoint/vim_t+_midclstok_ft_78p3acc.pth"
+    model_name = "vim_tinyplus_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
+    net_name = "vim-tinyplus"
+    # resum_path = "model_vim_quant/saved_checkpoint/vim_s_midclstok_80p5acc.pth"
+    # model_name = "vim_small_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
+    # net_name = "vim-small"
+    # resum_path = "model_vim_quant/saved_checkpoint/vim_s+_midclstok_ft_81p6acc.pth"
+    # model_name = "vim_smallplus_patch16_stride8_224_bimambav2_final_pool_mean_abs_pos_embed_with_midclstok_div2"
+    # net_name = "vim-smallplus"
+    # resum_path = "model_vim_quant/saved_checkpoint/vim_b_midclstok_81p9acc.pth"
+    # model_name = "vim_base_patch16_224_bimambav2_final_pool_mean_abs_pos_embed_with_middle_cls_token_div2"
+    # net_name = "vim-base"
+    output_path = "./saved_checkpoint"
+    matmul_scale_type = "S4"
     batch_size = 1
     num_samples = 128
     
@@ -117,7 +223,7 @@ def vim_generate_matmul_scale():
 
     checkpoint = torch.load(resum_path, map_location='cpu')
     lm.load_state_dict(checkpoint['model'])
-    from vim_quant.vim.utils import convert_vim_2_vim_torch
+    from model_vim_quant.vim.utils import convert_vim_2_vim_torch
     convert_vim_2_vim_torch(lm,device)
 
     args.data_set = 'IMNET'
@@ -135,7 +241,7 @@ def vim_generate_matmul_scale():
     model = lm
     
     #ptq
-    from vim.normalized_modules import MatMul
+    from model_vim_quant.vim.normalized_modules import MatMul
     from quantize import QuantMatMul,QuantLinear,QuantConv1d,QuantConv2d
     w_cfg = {"dynamic_method":"per_tensor","n_bits":8}
     a_cfg = {"dynamic_method":"per_tensor","n_bits":8}
@@ -160,8 +266,8 @@ def vim_generate_matmul_scale():
     from quantize.utils import set_quant_state
     set_quant_state(model,weight_quant=True,act_quant=True)
 
-    from vim.hm_model_utils import fuse_layer_norms, RotateModule, RQuantLinear
-    from vim.hadamard import random_hadamard_matrix
+    from quantize.hm_model_utils import fuse_layer_norms, RotateModule, RQuantLinear
+    from quantize.hadmard import random_hadamard_matrix
     h1 = random_hadamard_matrix(model.layers[0].mixer.in_proj.in_features,device)
     R1 = RotateModule(h1)
     h2 = random_hadamard_matrix(model.layers[0].mixer.out_proj.in_features,device)
@@ -199,10 +305,15 @@ def vim_generate_matmul_scale():
         substitute_layers(model)
 
     set_quant_state(model,weight_quant=False,act_quant=False)
+
     
-    
-    act_scales = get_matmul_act_scales(model, data_loader_val,num_samples)
-    save_path = os.path.join(output_path,f'{net_name}_matmul_scale.pt')
+    if matmul_scale_type == "S3":
+        act_scales = get_matmul_act_scales_S3(model, data_loader_val,num_samples)
+    elif matmul_scale_type == "S4":
+        act_scales = get_matmul_act_scales_S4(model, data_loader_val,num_samples)
+    else:
+        raise NotImplementedError
+    save_path = os.path.join(output_path,f'{net_name}_matmul_scale_'+matmul_scale_type+'.pt')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(act_scales, save_path)
 
@@ -278,8 +389,106 @@ def mamba2d_classify_generate_matmul_scale():
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(act_scales, save_path)
 
+def mamba_llm_generate_matmul_scale_S3(model):
+    import torch,datasets,random
+    traindata = datasets.load_dataset("hellaswag",split='test')
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+    trainenc = tokenizer("\n\n".join(traindata['ctx']), return_tensors='pt') 
+    dataloader = []
+    num_samples = 128
+    for _ in range(num_samples):
+        i = random.randint(0, trainenc.input_ids.shape[1] - 2048 - 1)
+        j = i + 2048
+        inp = trainenc.input_ids[:, i:j]
+        tar = inp.clone()
+        tar[:, :-1] = -100
+        dataloader.append((inp, tar))
+    
+    act_scales = {}    
+    from quantize.int_matmul import QuantMatMul
+    def stat_tensor(name, tensor):
+        tmp = tensor.permute(0,1,3,2) #
+        # tmp = tensor
+        hidden_dim = tmp.shape[-1]
+        tmp = tmp.reshape(-1, hidden_dim).abs().detach()
+        # comming_max = torch.max(tmp, dim=0)[0].float().cpu()
+        comming_max = torch.quantile(tmp.float(), 0.999999, dim=0).float().cpu()
+        if name in act_scales:
+            act_scales[name] = torch.max(act_scales[name], comming_max)
+        else:
+            act_scales[name] = comming_max
+
+    def stat_input_hook(m, x, y, name):
+        if isinstance(x, tuple):
+            x = x[0]
+        stat_tensor(name, x)
+
+    hooks = []
+    for name, m in model.named_modules():
+        if isinstance(m, QuantMatMul):
+            hooks.append(
+                m.register_forward_hook(
+                    functools.partial(stat_input_hook, name=name)))
+
+    input = torch.cat([i[0] for i in dataloader],dim=0)[:2]
+    model(input.to(model.device))
+
+    for h in hooks:
+        h.remove()
+        
+    return act_scales
+
+def mamba_llm_generate_matmul_scale_S4(model):
+    import torch,datasets,random
+    traindata = datasets.load_dataset("hellaswag",split='test')
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+    trainenc = tokenizer("\n\n".join(traindata['ctx']), return_tensors='pt') 
+    dataloader = []
+    num_samples = 128
+    for _ in range(num_samples):
+        i = random.randint(0, trainenc.input_ids.shape[1] - 2048 - 1)
+        j = i + 2048
+        inp = trainenc.input_ids[:, i:j]
+        tar = inp.clone()
+        tar[:, :-1] = -100
+        dataloader.append((inp, tar))
+    
+    act_scales = {}    
+    from quantize.int_matmul import QuantMatMul
+    def stat_tensor(name, tensor):
+        tmp = tensor.permute(0,1,3,2) #
+        # tmp = tensor
+        hidden_dim = tmp.shape[-1]
+        tmp = tmp.reshape(-1, hidden_dim).abs().detach()
+        # comming_max = torch.max(tmp, dim=0)[0].float().cpu()
+        comming_max = torch.quantile(tmp.float(), 0.999999, dim=0).float().cpu()
+        if name in act_scales:
+            act_scales[name] = torch.max(act_scales[name], comming_max)
+        else:
+            act_scales[name] = comming_max
+
+    def stat_input_hook(m, x, y, name):
+        if isinstance(x, tuple):
+            x = x[1]
+        stat_tensor(name, x)
+
+    hooks = []
+    for name, m in model.named_modules():
+        if isinstance(m, QuantMatMul):
+            hooks.append(
+                m.register_forward_hook(
+                    functools.partial(stat_input_hook, name=name)))
+
+    input = torch.cat([i[0] for i in dataloader],dim=0)[:2]
+    model(input.to(model.device))
+
+    for h in hooks:
+        h.remove()
+        
+    return act_scales
+
 
 
 if __name__ == '__main__':
-    # vim_generate_matmul_scale()
-    mamba2d_classify_generate_matmul_scale()
+    vim_generate_matmul_scale()
+    # mamba2d_classify_generate_matmul_scale()
