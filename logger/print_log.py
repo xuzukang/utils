@@ -30,4 +30,4 @@ class Logger(object):
         self.log.close()
 
 
-sys.stdout = Logger(folder="logs")
+sys.stdout = Logger(folder="./output/logs")
