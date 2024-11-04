@@ -89,11 +89,11 @@ def print_diff_info(diff_out: dict):
     --------------------------------------------------------
     """
     table = Table(title="diff table")
-    table.add_column("node output")
-    table.add_column("node_type")
-    table.add_column("abs mean diff")
-    table.add_column("abs mean re diff")
-    table.add_column("信噪比snr")
+    table.add_column("node")
+    table.add_column("cos_similarity")
+    table.add_column("snr")
+    table.add_column("relative_error")
+    table.add_column("abs_error")
 
     def add_row(
         table: Table,
@@ -104,17 +104,13 @@ def print_diff_info(diff_out: dict):
     ) -> None:
         if postprocess is None:
             postprocess = str
-        if is_better(diff_data["mean_ab_diff"]):
-            table.add_row(
-                key,
-                postprocess(diff_data["node_type"]),
-                postprocess(diff_data["mean_ab_diff"]),
-                postprocess(diff_data["mean_re_diff"]),
-                postprocess(diff_data["snr"]),
-            )
-        # else:
-        #     table.add_row(key, postprocess(diff_data["node_type"]),
-        #         postprocess(diff_data["max_ab_diff"]), postprocess(diff_data["mean_ab_diff"]), postprocess(diff_data["max_re_diff"]))
+        table.add_row(
+            key,
+            postprocess(diff_data["cos_similarity"]),
+            postprocess(diff_data["snr"]),
+            postprocess(diff_data["relative_error"]),
+            postprocess(diff_data["abs_error"]),
+        )
 
     for key in diff_out.keys():
         add_row(table, key, diff_out[key], lambda diff: diff >= 1e-7)
@@ -124,30 +120,38 @@ def print_diff_info(diff_out: dict):
 
 def cos_similarity(ta, tb):
     # 计算向量的余弦相似度
-    if np.sum(ta * tb) == 0:
+    ta = ta.float()
+    tb = tb.float()
+    if torch.sum(ta * tb) == 0:
         return 0.0
-    return np.sum(ta * tb) / (
-        np.sqrt(np.sum(np.square(ta))) * np.sqrt(np.sum(np.square(tb)))
+    return torch.sum(ta * tb) / (
+        torch.sqrt(torch.sum(torch.square(ta))) * torch.sqrt(torch.sum(torch.square(tb)))
     )
 
 
 def snr(ta, tb):
     # 计算信噪比
-    if np.sum(ta**2) == 0:
+    ta = ta.float()
+    tb = tb.float()
+    if torch.sum(ta**2) == 0:
         return 0.0
-    return np.sum((ta - tb) ** 2) / np.sum(ta**2)
+    return torch.sum((ta - tb) ** 2) / torch.sum(ta**2)
 
 
 def relative_error(ta, tb):
     # 计算相对误差
-    if np.mean(np.abs(ta)) == 0:
+    ta = ta.float()
+    tb = tb.float()
+    if torch.mean(torch.abs(ta)) == 0:
         return 0.0
-    return np.mean(np.abs(ta - tb)) / np.mean(np.abs(ta))
+    return torch.mean(torch.abs(ta - tb)) / torch.mean(torch.abs(ta))
 
 
 def abs_error(ta, tb):
     # 计算相对误差
-    return np.mean(np.abs(ta - tb))
+    ta = ta.float()
+    tb = tb.float()
+    return torch.mean(torch.abs(ta - tb))
 
 
 # 把以上三个计算误差的函数放到一个字典中，方便后续调用
